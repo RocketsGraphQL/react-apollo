@@ -7,6 +7,7 @@ import {
   split,
   InMemoryCache,
   from,
+  HttpLink
 } from "@apollo/client";
 
 const defaultOptions = {
@@ -35,6 +36,7 @@ export function generateApolloClient({
         if (auth) {
           if (auth.isAuthenticated()) {
             resHeaders.authorization = `Bearer ${auth.getJWTToken()}`;
+            console.log(resHeaders);
           } else {
             resHeaders.role = publicRole;
           }
@@ -51,9 +53,11 @@ export function generateApolloClient({
         }}));
         return forward(operation);
     });
+
+    
+
     const client = new ApolloClient({
-        uri: gqlEndpoint,
-        link: authLink,
+        link: from([authLink, new HttpLink({ uri: gqlEndpoint })]),
         cache: new InMemoryCache(),
     });
     return client;
@@ -71,6 +75,7 @@ export class RApolloProvider extends React.Component {
             connectToDevTools,
             onError,
         } = this.props;
+        console.log(this.props);
         const client = generateApolloClient({
             auth,
             gqlEndpoint,
