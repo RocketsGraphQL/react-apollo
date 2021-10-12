@@ -1,7 +1,7 @@
 {
   "name": "@kaushik_varanasi/react-apollo",
-  "version": "1.0.10",
-  "description": "",
+  "version": "2.0.0",
+  "description": "Package to use with Apollo client",
   "main": "dist/index.js",
   "files": [
     "./dist"
@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@apollo/client": "^3.4.11",
+    "apollo-link-ws": "^1.0.20",
     "graphql": "^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0",
     "react": "^16.6.1 || ^17.0.0",
     "react-dom": "^16.6.3 || ^17.0.0",

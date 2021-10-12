@@ -24,6 +24,10 @@ var _react = _interopRequireDefault(require("react"));
 
 var _client = require("@apollo/client");
 
+var _ws = require("@apollo/client/link/ws");
+
+var _utilities = require("@apollo/client/utilities");
+
 function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = (0, _getPrototypeOf2["default"])(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = (0, _getPrototypeOf2["default"])(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return (0, _possibleConstructorReturn2["default"])(this, result); }; }
 
 function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
@@ -48,17 +52,21 @@ function generateApolloClient(_ref) {
       _ref$connectToDevTool = _ref.connectToDevTools,
       connectToDevTools = _ref$connectToDevTool === void 0 ? false : _ref$connectToDevTool,
       onError = _ref.onError;
+  var wsUri = gqlEndpoint.startsWith("https") ? gqlEndpoint.replace(/^https/, "wss") : gqlEndpoint.replace(/^http/, "ws");
 
   var getheaders = function getheaders(auth) {
     var resHeaders = _objectSpread({}, headers);
 
     if (auth) {
       if (auth.isAuthenticated()) {
-        resHeaders.authorization = "Bearer ".concat(auth.getJWTToken());
-        console.log(resHeaders);
+        resHeaders["Authorization"] = "Bearer ".concat(auth.getJWTToken());
+        resHeaders["X-Hasura-User-Id"] = "".concat(auth.getUserId());
+        resHeaders["X-Hasura-Role"] = "user";
       } else {
-        resHeaders.role = publicRole;
+        resHeaders["X-Hasura-Role"] = publicRole;
       }
+    } else {
+      resHeaders["X-Hasura-Role"] = publicRole;
     }
 
     return resHeaders;
@@ -69,18 +77,41 @@ function generateApolloClient(_ref) {
     operation.setContext(function (_ref2) {
       var headers = _ref2.headers;
       return {
-        headers: _objectSpread(_objectSpread({}, authHeaders), headers)
+        headers: _objectSpread({}, authHeaders)
       };
     });
     return forward(operation);
   });
+  var ssr = typeof window === "undefined";
+  var wsLink = !ssr ? new _ws.WebSocketLink({
+    uri: wsUri,
+    options: {
+      reconnect: true,
+      lazy: true,
+      connectionParams: function connectionParams() {
+        var connectionHeaders = getheaders(auth);
+        return {
+          headers: connectionHeaders
+        };
+      }
+    }
+  }) : null;
+  var httpLink = new _client.HttpLink({
+    uri: gqlEndpoint
+  });
+  var link = (0, _client.split)(function (_ref3) {
+    var query = _ref3.query;
+    var definition = (0, _utilities.getMainDefinition)(query);
+    return definition.kind === 'OperationDefinition' && definition.operation === 'subscription';
+  }, wsLink, authLink.concat(httpLink));
   var client = new _client.ApolloClient({
-    link: (0, _client.from)([authLink, new _client.HttpLink({
-      uri: gqlEndpoint
-    })]),
+    link: (0, _client.from)([link]),
     cache: new _client.InMemoryCache()
   });
-  return client;
+  return {
+    client: client,
+    wsLink: wsLink
+  };
 }
 
 var RApolloProvider = function (_React$Component) {
@@ -102,8 +133,8 @@ var RApolloProvider = function (_React$Component) {
         cache = _this$props.cache,
         connectToDevTools = _this$props.connectToDevTools,
         onError = _this$props.onError;
-    console.log(_this.props);
-    var client = generateApolloClient({
+
+    var _generateApolloClient = generateApolloClient({
       auth: auth,
       gqlEndpoint: gqlEndpoint,
       headers: headers,
@@ -111,8 +142,12 @@ var RApolloProvider = function (_React$Component) {
       cache: cache,
       connectToDevTools: connectToDevTools,
       onError: onError
-    });
+    }),
+        client = _generateApolloClient.client,
+        wsLink = _generateApolloClient.wsLink;
+
     _this.client = client;
+    _this.wsLink = wsLink;
     return _this;
   }
 

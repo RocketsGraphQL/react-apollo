@@ -9,6 +9,8 @@ import {
   from,
   HttpLink
 } from "@apollo/client";
+import { WebSocketLink } from "@apollo/client/link/ws";
+import { getMainDefinition } from "@apollo/client/utilities";
 
 const defaultOptions = {
   watchQuery: {
@@ -25,6 +27,11 @@ export function generateApolloClient({
     connectToDevTools = false,
     onError
   }) {
+
+    const wsUri = gqlEndpoint.startsWith("https")
+    ? gqlEndpoint.replace(/^https/, "wss")
+    : gqlEndpoint.replace(/^http/, "ws");
+
     const getheaders = (auth) => {
         // add headers
         const resHeaders = {
@@ -35,13 +42,18 @@ export function generateApolloClient({
         // or add 'public' role if not signed in
         if (auth) {
           if (auth.isAuthenticated()) {
-            resHeaders.authorization = `Bearer ${auth.getJWTToken()}`;
-            console.log(resHeaders);
+            resHeaders["Authorization"] = `Bearer ${auth.getJWTToken()}`;
+            resHeaders["X-Hasura-User-Id"] = `${auth.getUserId()}`;
+            resHeaders["X-Hasura-Role"] = "user";
           } else {
-            resHeaders.role = publicRole;
+            resHeaders["X-Hasura-Role"] = publicRole;
           }
+        } else {
+          resHeaders["X-Hasura-Role"] = publicRole;
         }
-    
+
+        //resHeaders["X-Hasura-Allowed-Roles"] = headers && headers["X-Hasura-Allowed-Roles"] ? headers["X-Hasura-Allowed-Roles"] : ["user", "public"]
+        // resHeaders["X-Hasura-Default-Role"] = resHeaders["X-Hasura-Default-Role"] ? resHeaders["X-Hasura-Default-Role"] : "user"
         return resHeaders;
     };
 
@@ -49,18 +61,56 @@ export function generateApolloClient({
     const authLink = new ApolloLink((operation, forward) => {
         operation.setContext(({ headers }) => ({ headers: {
           ...authHeaders,
-          ...headers,
         }}));
         return forward(operation);
     });
 
+    const ssr = typeof window === "undefined";
+  
+
+    // create ws link
+    const wsLink = !ssr
+      ? new WebSocketLink({
+          uri: wsUri,
+          options: {
+            reconnect: true,
+            lazy: true,
+            connectionParams: () => {
+              const connectionHeaders = getheaders(auth);
+              return {
+                headers: connectionHeaders,
+              };
+            },
+          },
+        })
+      : null;
+
+    // Create an http link:
+    const httpLink = new HttpLink({
+      uri: gqlEndpoint
+    });
     
+    // using the ability to split links, you can send data to each link
+    // depending on what kind of operation is being sent
+    const link = split(
+      // split based on operation type
+      ({ query }) => {
+        const definition = getMainDefinition(query);
+        return (
+          definition.kind === 'OperationDefinition' &&
+          definition.operation === 'subscription'
+        );
+      },
+      wsLink,
+      authLink.concat(httpLink),
+    )
+
 
     const client = new ApolloClient({
-        link: from([authLink, new HttpLink({ uri: gqlEndpoint })]),
+        link: from([link]),
         cache: new InMemoryCache(),
     });
-    return client;
+    return { client, wsLink };
 }
 
 export class RApolloProvider extends React.Component {
@@ -75,8 +125,7 @@ export class RApolloProvider extends React.Component {
             connectToDevTools,
             onError,
         } = this.props;
-        console.log(this.props);
-        const client = generateApolloClient({
+        const {client, wsLink} = generateApolloClient({
             auth,
             gqlEndpoint,
             headers,
@@ -86,6 +135,30 @@ export class RApolloProvider extends React.Component {
             onError,
         });
         this.client = client;
+        this.wsLink = wsLink;
+        // if (this.props.auth) {
+        //   this.props.auth.onTokenChanged(() => {
+        //     if (this.wsLink.subscriptionClient.status === 1) {
+        //       this.wsLink.subscriptionClient.tryReconnect();
+        //     }
+        //   });
+    
+        //   this.props.auth.onAuthStateChanged(async (data) => {
+        //     // reconnect ws connection with new auth headers for the logged in/out user
+        //     if (this.wsLink.subscriptionClient.status === 1) {
+        //       // must close first to avoid race conditions
+        //       this.wsLink.subscriptionClient.close();
+        //       // reconnect
+        //       this.wsLink.subscriptionClient.tryReconnect();
+        //     }
+        //     if (!data) {
+        //       await client.resetStore().catch((error) => {
+        //         console.error("Error resetting Apollo client cache");
+        //         console.error(error);
+        //       });
+        //     }
+        //   });
+        // }
     }
     render() {
         return (
