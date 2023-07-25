@@ -18,7 +18,7 @@ type RApolloProviderProps = {
     auth: any,
     gqlEndpoint: string,
     headers?: any,
-    publicRole: string,
+    publicRole?: string,
     cache?: any,
     connectToDevTools?: boolean,
     onError?: Function,
@@ -77,6 +77,10 @@ export function generateApolloClient({
 
     const ssr = typeof window === "undefined";
   
+    // Create an http link:
+    const httpLink = new HttpLink({
+        uri: gqlEndpoint
+    });
 
     // create ws link
     const wsLink = !ssr
@@ -95,10 +99,7 @@ export function generateApolloClient({
         })
       : null;
 
-    // Create an http link:
-    const httpLink = new HttpLink({
-      uri: gqlEndpoint
-    });
+
     
     // using the ability to split links, you can send data to each link
     // depending on what kind of operation is being sent
@@ -121,7 +122,12 @@ export function generateApolloClient({
         });
         return { client, wsLink };
     } else {
-        throw new Error('gqlEndpoint not provided')
+        const client = new ApolloClient({
+            ssrMode: true,
+            link: from([httpLink]),
+            cache: new InMemoryCache(),
+        });
+        return { client, wsLink };
     }
 
 }
